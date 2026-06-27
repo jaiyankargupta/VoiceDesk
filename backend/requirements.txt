@@ -1,0 +1,8 @@
+livekit-agents[openai,deepgram,elevenlabs,silero]~=1.6
+livekit-api~=1.0
+fastapi[standard]~=0.115
+uvicorn~=0.34
+aiosqlite~=0.21
+httpx~=0.28
+twilio~=9.0
+python-dotenv~=1.0
