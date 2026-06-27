@@ -169,9 +169,8 @@ async def entrypoint(ctx: JobContext):
 
 async def handle_transfer(session: AgentSession, ctx: JobContext):
     transcript_parts = []
-    # In livekit-agents >= 1.6, AgentSession uses session.history or session._chat_ctx
-    # session.history should be the ChatContext
-    for msg in session.history.messages if hasattr(session.history, "messages") else session.history:
+    # In livekit-agents >= 1.6, AgentSession uses session.history which is a ChatContext with .items
+    for msg in session.history.items:
         if hasattr(msg, "role") and hasattr(msg, "content") and msg.content:
             transcript_parts.append(f"{msg.role}: {msg.content}")
     summary = ". ".join(transcript_parts[-6:]) if transcript_parts else "No context available"
@@ -194,8 +193,7 @@ async def handle_transfer(session: AgentSession, ctx: JobContext):
 
 async def generate_call_summary(session: AgentSession) -> str:
     messages = []
-    history_items = session.history.messages if hasattr(session.history, "messages") else session.history
-    for msg in history_items:
+    for msg in session.history.items:
         if hasattr(msg, "role") and hasattr(msg, "content") and msg.content:
             messages.append(f"{msg.role}: {msg.content}")
 
