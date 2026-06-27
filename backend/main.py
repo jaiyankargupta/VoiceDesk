@@ -48,15 +48,17 @@ async def create_token(room: str = "voicedesk-room", identity: str = "caller"):
     if not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         raise HTTPException(status_code=500, detail="LiveKit credentials not configured")
 
-    token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-    token.identity = identity
-    token.name = identity
-    token.add_grant(VideoGrants(
-        room_join=True,
-        room=room,
-        can_publish=True,
-        can_subscribe=True,
-    ))
+    token = (
+        AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+        .with_identity(identity)
+        .with_name(identity)
+        .with_grants(VideoGrants(
+            room_join=True,
+            room=room,
+            can_publish=True,
+            can_subscribe=True,
+        ))
+    )
 
     return {"token": token.to_jwt(), "url": LIVEKIT_URL}
 
