@@ -211,10 +211,14 @@ async def generate_call_summary(session: AgentSession) -> str:
 Transcript:
 {transcript}"""
 
-    response = await llm.chat(
-        messages=[{"role": "user", "content": summary_prompt}]
-    )
-    return response.choices[0].message.content
+    from livekit.agents.llm import ChatContext, ChatMessage
+    ctx = ChatContext()
+    ctx.items.append(ChatMessage(role="user", content=[summary_prompt]))
+    stream = llm.chat(chat_ctx=ctx)
+    summary_text = ""
+    async for text in stream.to_str_iterable():
+        summary_text += text
+    return summary_text
 
 
 if __name__ == "__main__":
