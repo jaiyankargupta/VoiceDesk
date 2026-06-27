@@ -11,7 +11,7 @@ CAL_BASE_URL = "https://api.cal.com/v2"
 def _get_headers() -> dict:
     return {
         "Authorization": f"Bearer {os.getenv('CAL_API_KEY', '')}",
-        "cal-api-version": "2024-06-14",
+        "cal-api-version": "2024-08-13",
         "Content-Type": "application/json",
     }
 
@@ -43,9 +43,16 @@ async def get_available_slots(date: str) -> list[str]:
 
     slots = data.get("data", {}).get("slots", {})
     available = []
-    for day_slots in slots.values():
-        for slot in day_slots:
-            available.append(slot["time"])
+    if isinstance(slots, dict):
+        for slot_list in slots.values():
+            for s in slot_list:
+                if s.get("time"):
+                    available.append(s["time"])
+    elif isinstance(slots, list):
+        for s in slots:
+            if isinstance(s, dict) and s.get("time"):
+                available.append(s["time"])
+
     return available
 
 
@@ -60,8 +67,6 @@ async def create_booking(
     payload = {
         "eventTypeId": int(_get_event_type_id()),
         "start": start_time,
-        "timeZone": "Asia/Kolkata",
-        "language": "en",
         "attendee": {
             "name": name,
             "email": email or f"{name.lower().replace(' ', '.')}@placeholder.com",
