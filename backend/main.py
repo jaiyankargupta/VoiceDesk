@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from livekit.api import LiveKitAPI, AccessToken, VideoGrants
 
 from backend import db
-from backend.monitoring import event_bus, EventType
+from backend.monitoring import event_bus, EventType, MonitorEvent
 
 env_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(env_path)
@@ -102,6 +102,18 @@ async def transfer_response(request: Request):
     else:
         twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">Declined.</Say><Hangup/></Response>'
     return Response(content=twiml, media_type="application/xml")
+
+
+@app.post("/api/events")
+async def receive_event(request: Request):
+    payload = await request.json()
+    event_type = payload.get("type")
+    data = payload.get("data", {})
+    try:
+        await event_bus.publish(MonitorEvent(type=EventType(event_type), data=data))
+    except Exception as e:
+        logger.error(f"Error publishing event: {e}")
+    return {"status": "ok"}
 
 
 @app.websocket("/ws/monitor")

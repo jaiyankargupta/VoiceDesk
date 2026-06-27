@@ -31,9 +31,15 @@ class EventBus:
 
     def __init__(self):
         self._subscribers: list[asyncio.Queue] = []
+        self._history: list[MonitorEvent] = []
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=256)
+        for event in self._history:
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                break
         self._subscribers.append(q)
         return q
 
@@ -41,6 +47,9 @@ class EventBus:
         self._subscribers = [s for s in self._subscribers if s is not q]
 
     async def publish(self, event: MonitorEvent):
+        self._history.append(event)
+        if len(self._history) > 100:
+            self._history.pop(0)
         dead = []
         for q in self._subscribers:
             try:
@@ -52,6 +61,16 @@ class EventBus:
 
     async def emit(self, event_type: EventType, data: dict | None = None):
         await self.publish(MonitorEvent(type=event_type, data=data or {}))
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as s:
+                await s.post(
+                    "http://127.0.0.1:8080/api/events",
+                    json={"type": event_type.value, "data": data or {}},
+                    timeout=aiohttp.ClientTimeout(total=0.5),
+                )
+        except Exception:
+            pass
 
 
 event_bus = EventBus()

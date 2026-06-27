@@ -39,7 +39,8 @@ SYSTEM_PROMPT = """You are a friendly, professional receptionist named Alex at a
 Your responsibilities:
 - Greet callers warmly and ask how you can help
 - Book, reschedule, or cancel appointments using the available tools
-- When booking, collect: full name, reason for visit, preferred date and time, and contact phone number
+- When booking, you must collect: full name, reason for visit, preferred date and time, and contact phone number.
+- CRITICAL: Ask for these details ONE AT A TIME naturally (e.g. ask for the date/time first to check availability, then ask for their name, then their phone number). Do NOT ask for all details in a single sentence.
 - Always check availability before confirming a booking
 - Read back the full booking confirmation to the caller
 
@@ -101,35 +102,63 @@ async def entrypoint(ctx: JobContext):
         tools=tools,
     )
 
-    @session.on("user_speech_committed")
-    def on_user_speech(msg):
+    import re
+    _last_emitted = {}  # track last emitted text per role to deduplicate
+
+    @session.on("conversation_item_added")
+    def on_item_added(ev):
+        item = ev.item
+        if not hasattr(item, "role") or not hasattr(item, "text_content"):
+            return
+        text = item.text_content or ""
+        # Strip function-call XML tags the LLM emits (e.g. <function=name>{...}</function>)
+        text = re.sub(r"<function=[^>]*>.*?</function>", "", text, flags=re.DOTALL).strip()
+        if not text:
+            return
+        role = "user" if item.role == "user" else "agent"
+        # Deduplicate: skip if identical to last emitted text for this role
+        if _last_emitted.get(role) == text:
+            return
+        _last_emitted[role] = text
         asyncio.create_task(
-            event_bus.emit(EventType.TRANSCRIPT, {"role": "user", "text": msg.content})
+            event_bus.emit(EventType.TRANSCRIPT, {"role": role, "text": text})
         )
 
-    @session.on("agent_speech_committed")
-    def on_agent_speech(msg):
-        asyncio.create_task(
-            event_bus.emit(EventType.TRANSCRIPT, {"role": "agent", "text": msg.content})
-        )
+    @session.on("agent_state_changed")
+    def on_state_changed(ev):
+        asyncio.create_task(event_bus.emit(EventType.AGENT_STATE, {"state": ev.new_state}))
 
-    @session.on("agent_started_speaking")
-    def on_speaking():
-        asyncio.create_task(event_bus.emit(EventType.AGENT_STATE, {"state": "speaking"}))
-
-    @session.on("agent_stopped_speaking")
-    def on_stopped():
-        asyncio.create_task(event_bus.emit(EventType.AGENT_STATE, {"state": "listening"}))
-
-    @session.on("function_calls_collected")
-    def on_thinking():
-        asyncio.create_task(event_bus.emit(EventType.AGENT_STATE, {"state": "thinking"}))
-
-    @session.on("function_calls_finished")
-    def on_tool_done(called_functions):
-        for fn in called_functions:
-            if fn.result and "__TRANSFER_REQUESTED__" in str(fn.result):
+    @session.on("function_tools_executed")
+    def on_tools_executed(ev):
+        for out in ev.function_call_outputs:
+            if out and out.output and "__TRANSFER_REQUESTED__" in str(out.output):
                 asyncio.create_task(handle_transfer(session, ctx))
+
+    @ctx.room.on("participant_connected")
+    def on_participant_connected(participant):
+        if participant.identity == "watcher":
+            logger.info("Watcher joined, muting agent")
+            session.interrupt()
+            for pub in ctx.room.local_participant.track_publications.values():
+                if pub.track:
+                    pub.track.mute()
+
+    @ctx.room.on("participant_disconnected")
+    def on_participant_disconnected(participant):
+        if participant.identity == "watcher":
+            logger.info("Watcher left, unmuting agent")
+            for pub in ctx.room.local_participant.track_publications.values():
+                if pub.track:
+                    pub.track.unmute()
+            return
+
+        # Main caller left
+        async def _generate_and_emit_summary():
+            await event_bus.emit(EventType.CALL_STATUS, {"status": "ended"})
+            summary = await generate_call_summary(session)
+            await event_bus.emit(EventType.CALL_SUMMARY, {"summary": summary})
+        
+        asyncio.create_task(_generate_and_emit_summary())
 
     await session.start(agent=agent, room=ctx.room)
 
@@ -140,7 +169,9 @@ async def entrypoint(ctx: JobContext):
 
 async def handle_transfer(session: AgentSession, ctx: JobContext):
     transcript_parts = []
-    for msg in session.chat_ctx.items:
+    # In livekit-agents >= 1.6, AgentSession uses session.history or session._chat_ctx
+    # session.history should be the ChatContext
+    for msg in session.history.messages if hasattr(session.history, "messages") else session.history:
         if hasattr(msg, "role") and hasattr(msg, "content") and msg.content:
             transcript_parts.append(f"{msg.role}: {msg.content}")
     summary = ". ".join(transcript_parts[-6:]) if transcript_parts else "No context available"
@@ -163,7 +194,8 @@ async def handle_transfer(session: AgentSession, ctx: JobContext):
 
 async def generate_call_summary(session: AgentSession) -> str:
     messages = []
-    for msg in session.chat_ctx.items:
+    history_items = session.history.messages if hasattr(session.history, "messages") else session.history
+    for msg in history_items:
         if hasattr(msg, "role") and hasattr(msg, "content") and msg.content:
             messages.append(f"{msg.role}: {msg.content}")
 

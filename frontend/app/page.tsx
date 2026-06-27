@@ -37,8 +37,13 @@ export default function CallPage() {
     const wsUrl = API_BASE.replace(/^http/, "ws");
     const ws = new WebSocket(`${wsUrl}/ws/monitor`);
 
+    ws.onopen = () => {
+      setTranscript([]); // clear transcript on connect because backend sends full history
+    };
+
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
+      console.log("WebSocket event received on CallPage:", msg);
       if (msg.type === "transcript") {
         setTranscript((prev) => [...prev, { ...msg.data, ts: msg.ts }]);
       }
@@ -48,11 +53,24 @@ export default function CallPage() {
     };
 
     ws.onclose = () => {
-      setTimeout(connectMonitor, 2000);
+      if (wsRef.current === ws) {
+        setTimeout(connectMonitor, 2000);
+      }
     };
 
     wsRef.current = ws;
   }, []);
+
+  useEffect(() => {
+    connectMonitor();
+    return () => {
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        wsRef.current = null;
+        ws.close();
+      }
+    };
+  }, [connectMonitor]);
 
   const startCall = async () => {
     setConnectionState("connecting");
@@ -93,7 +111,6 @@ export default function CallPage() {
       await roomRef.current.disconnect();
       roomRef.current = null;
     }
-    wsRef.current?.close();
     setConnectionState("disconnected");
   };
 

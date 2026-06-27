@@ -5,19 +5,20 @@ from twilio.rest import Client
 
 logger = logging.getLogger("voicedesk.transfer")
 
-TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM = os.getenv("TWILIO_FROM_NUMBER", "")
-HUMAN_PHONE = os.getenv("HUMAN_AGENT_PHONE", "")
-
 TRANSFER_TIMEOUT = 30
 
 
 def _get_client() -> Client | None:
-    if not all([TWILIO_SID, TWILIO_TOKEN]):
+    sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+    token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    if not all([sid, token]):
         logger.warning("Twilio credentials not configured")
         return None
-    return Client(TWILIO_SID, TWILIO_TOKEN)
+    if sid.startswith("SK"):
+        ac_sid = os.getenv("TWILIO_REAL_ACCOUNT_SID", "")
+        if ac_sid:
+            return Client(username=sid, password=token, account_sid=ac_sid)
+    return Client(sid, token)
 
 
 async def initiate_warm_transfer(call_summary: str) -> dict:
@@ -29,15 +30,18 @@ async def initiate_warm_transfer(call_summary: str) -> dict:
     if not client:
         return {"accepted": False, "message": "Twilio is not configured"}
 
-    if not HUMAN_PHONE:
+    human_phone = os.getenv("HUMAN_AGENT_PHONE", "")
+    twilio_from = os.getenv("TWILIO_FROM_NUMBER", "")
+
+    if not human_phone:
         return {"accepted": False, "message": "Human agent phone number not set"}
 
     try:
         twiml = _build_transfer_twiml(call_summary)
         call = await asyncio.to_thread(
             client.calls.create,
-            to=HUMAN_PHONE,
-            from_=TWILIO_FROM,
+            to=human_phone,
+            from_=twilio_from,
             twiml=twiml,
             timeout=TRANSFER_TIMEOUT,
             status_callback_event=["completed"],

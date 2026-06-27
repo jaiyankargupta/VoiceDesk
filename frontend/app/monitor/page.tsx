@@ -31,10 +31,14 @@ export default function MonitorPage() {
     const wsUrl = API_BASE.replace(/^http/, "ws");
     const ws = new WebSocket(`${wsUrl}/ws/monitor`);
 
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => {
+      setConnected(true);
+      setTranscript([]); // clear transcript on connect because backend sends full history
+    };
 
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
+      console.log("Monitor WebSocket event received:", msg);
 
       switch (msg.type) {
         case "transcript":
@@ -63,7 +67,9 @@ export default function MonitorPage() {
 
     ws.onclose = () => {
       setConnected(false);
-      setTimeout(connectWebSocket, 2000);
+      if (wsRef.current === ws) {
+        setTimeout(connectWebSocket, 2000);
+      }
     };
 
     wsRef.current = ws;
@@ -71,7 +77,13 @@ export default function MonitorPage() {
 
   useEffect(() => {
     connectWebSocket();
-    return () => wsRef.current?.close();
+    return () => {
+      if (wsRef.current) {
+        const ws = wsRef.current;
+        wsRef.current = null;
+        ws.close();
+      }
+    };
   }, [connectWebSocket]);
 
   const statusColor = {

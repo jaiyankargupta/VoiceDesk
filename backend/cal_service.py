@@ -1,20 +1,27 @@
 import os
 import httpx
 from datetime import datetime
+from dotenv import load_dotenv
 
-CAL_API_KEY = os.getenv("CAL_API_KEY", "")
-CAL_EVENT_TYPE_ID = os.getenv("CAL_EVENT_TYPE_ID", "")
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 CAL_BASE_URL = "https://api.cal.com/v2"
 
-HEADERS = {
-    "Authorization": f"Bearer {CAL_API_KEY}",
-    "cal-api-version": "2024-08-13",
-    "Content-Type": "application/json",
-}
+
+def _get_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {os.getenv('CAL_API_KEY', '')}",
+        "cal-api-version": "2024-06-14",
+        "Content-Type": "application/json",
+    }
+
+
+def _get_event_type_id() -> str:
+    return os.getenv("CAL_EVENT_TYPE_ID", "")
 
 
 def is_configured() -> bool:
-    return bool(CAL_API_KEY and CAL_EVENT_TYPE_ID)
+    return bool(os.getenv("CAL_API_KEY", "") and _get_event_type_id())
 
 
 async def get_available_slots(date: str) -> list[str]:
@@ -22,12 +29,12 @@ async def get_available_slots(date: str) -> list[str]:
     params = {
         "startTime": f"{date}T00:00:00Z",
         "endTime": f"{date}T23:59:59Z",
-        "eventTypeId": CAL_EVENT_TYPE_ID,
+        "eventTypeId": _get_event_type_id(),
     }
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{CAL_BASE_URL}/slots/available",
-            headers=HEADERS,
+            headers=_get_headers(),
             params=params,
             timeout=10,
         )
@@ -51,7 +58,7 @@ async def create_booking(
 ) -> dict:
     """Create a booking on Cal.com and return the booking details."""
     payload = {
-        "eventTypeId": int(CAL_EVENT_TYPE_ID),
+        "eventTypeId": int(_get_event_type_id()),
         "start": start_time,
         "attendee": {
             "name": name,
@@ -63,7 +70,7 @@ async def create_booking(
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{CAL_BASE_URL}/bookings",
-            headers=HEADERS,
+            headers=_get_headers(),
             json=payload,
             timeout=15,
         )
@@ -82,7 +89,7 @@ async def cancel_booking(booking_uid: str) -> bool:
     async with httpx.AsyncClient() as client:
         resp = await client.delete(
             f"{CAL_BASE_URL}/bookings/{booking_uid}/cancel",
-            headers=HEADERS,
+            headers=_get_headers(),
             timeout=10,
         )
         return resp.status_code in (200, 204)
@@ -93,7 +100,7 @@ async def reschedule_booking(booking_uid: str, new_start_time: str) -> dict | No
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{CAL_BASE_URL}/bookings/{booking_uid}/reschedule",
-            headers=HEADERS,
+            headers=_get_headers(),
             json=payload,
             timeout=10,
         )
