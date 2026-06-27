@@ -60,10 +60,13 @@ async def create_booking(
     payload = {
         "eventTypeId": int(_get_event_type_id()),
         "start": start_time,
+        "timeZone": "Asia/Kolkata",
+        "language": "en",
         "attendee": {
             "name": name,
             "email": email or f"{name.lower().replace(' ', '.')}@placeholder.com",
             "timeZone": "Asia/Kolkata",
+            "language": "en",
         },
         "metadata": {"reason": reason, "phone": phone},
     }
