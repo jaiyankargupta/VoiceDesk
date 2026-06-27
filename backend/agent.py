@@ -27,7 +27,11 @@ from backend.tools import (
 from backend.twilio_transfer import initiate_warm_transfer
 from backend import db
 
-load_dotenv()
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
+if os.getenv("ELEVENLABS_API_KEY") and not os.getenv("ELEVEN_API_KEY"):
+    os.environ["ELEVEN_API_KEY"] = os.environ["ELEVENLABS_API_KEY"]
+
 logger = logging.getLogger("voicedesk.agent")
 
 SYSTEM_PROMPT = """You are a friendly, professional receptionist named Alex at a medical clinic called VoiceDesk Health.

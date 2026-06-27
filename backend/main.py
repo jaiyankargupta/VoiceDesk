@@ -14,7 +14,8 @@ from livekit.api import LiveKitAPI, AccessToken, VideoGrants
 from backend import db
 from backend.monitoring import event_bus, EventType
 
-load_dotenv()
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voicedesk.server")
 
