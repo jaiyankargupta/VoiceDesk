@@ -1,0 +1,89 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.stateRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.indicator {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  z-index: 1;
+}
+
+.pulseRing {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid;
+  animation: pulse-ring 1.5s ease-in-out infinite;
+}
+
+.spinner {
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-amber);
+  animation: spin-slow 1s linear infinite;
+}
+
+.waveGroup {
+  position: absolute;
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  height: 24px;
+}
+
+.waveBar {
+  width: 3px;
+  height: 8px;
+  background: var(--accent-indigo);
+  border-radius: 2px;
+  animation: wave 0.8s ease-in-out infinite;
+}
+
+.stateLabel {
+  font-size: 16px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.fieldLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.actionText {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
