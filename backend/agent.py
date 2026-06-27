@@ -1,6 +1,8 @@
 import logging
 import asyncio
 import os
+import certifi
+os.environ["SSL_CERT_FILE"] = certifi.where()
 from dotenv import load_dotenv
 
 from livekit import rtc
