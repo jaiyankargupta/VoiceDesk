@@ -1,6 +1,6 @@
 import logging
 from livekit.agents import function_tool, RunContext
-from backend import db, calendar as cal
+from backend import db, cal_service as cal
 from backend.monitoring import event_bus, EventType
 
 logger = logging.getLogger("voicedesk.tools")

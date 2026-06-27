@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 from dotenv import load_dotenv
 
 from livekit import rtc
@@ -11,7 +12,6 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.agents.voice import VoicePipelineAgent
 from livekit.plugins import openai, deepgram, elevenlabs, silero
 
 from backend.monitoring import event_bus, EventType
@@ -55,6 +55,20 @@ def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
 
+def _get_llm(model: str = "gpt-4o"):
+    groq_key = os.getenv("GROQ_API_KEY")
+    if not groq_key and os.getenv("OPENAI_API_KEY", "").startswith("gsk_"):
+        groq_key = os.getenv("OPENAI_API_KEY")
+    if groq_key:
+        groq_model = "llama-3.3-70b-versatile" if "gpt" in model else model
+        return openai.LLM(
+            model=groq_model,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=groq_key,
+        )
+    return openai.LLM(model=model)
+
+
 async def entrypoint(ctx: JobContext):
     await db.init_db()
     await ctx.connect()
@@ -64,7 +78,7 @@ async def entrypoint(ctx: JobContext):
     session = AgentSession(
         vad=ctx.proc.userdata["vad"],
         stt=deepgram.STT(model="nova-3"),
-        llm=openai.LLM(model="gpt-4o"),
+        llm=_get_llm(),
         tts=elevenlabs.TTS(),
     )
 
@@ -151,7 +165,7 @@ async def generate_call_summary(session: AgentSession) -> str:
         return "No conversation recorded."
 
     transcript = "\n".join(messages)
-    llm = openai.LLM(model="gpt-4o")
+    llm = _get_llm()
 
     summary_prompt = f"""Summarize this call transcript in 3-4 sentences. Include:
 - What the caller wanted
