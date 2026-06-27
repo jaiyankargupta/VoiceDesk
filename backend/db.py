@@ -1,19 +1,26 @@
 import aiosqlite
 import os
 from datetime import datetime
+from dotenv import load_dotenv
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 DB_PATH = os.getenv("DB_PATH", "voicedesk.db")
 
 
+def get_db_url() -> str:
+    return os.getenv("DATABASE_URL", "")
+
+
 def is_postgres() -> bool:
-    return bool(DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")))
+    url = get_db_url()
+    return bool(url and url.startswith(("postgres://", "postgresql://")))
 
 
 async def init_db():
     if is_postgres():
         import psycopg
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+        conn = await psycopg.AsyncConnection.connect(get_db_url())
         async with conn:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS appointments (
@@ -55,7 +62,7 @@ async def save_booking(
     if is_postgres():
         import psycopg
         from psycopg.rows import dict_row
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
+        conn = await psycopg.AsyncConnection.connect(get_db_url(), row_factory=dict_row)
         async with conn:
             cur = await conn.execute(
                 """INSERT INTO appointments
@@ -80,7 +87,7 @@ async def save_booking(
 async def check_slot_available(date_time: str) -> bool:
     if is_postgres():
         import psycopg
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+        conn = await psycopg.AsyncConnection.connect(get_db_url())
         async with conn:
             cur = await conn.execute(
                 "SELECT COUNT(*) FROM appointments WHERE date_time = %s AND status = 'confirmed'",
@@ -105,7 +112,7 @@ async def get_available_slots(date: str) -> list[str]:
 
     if is_postgres():
         import psycopg
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+        conn = await psycopg.AsyncConnection.connect(get_db_url())
         async with conn:
             cur = await conn.execute(
                 "SELECT date_time FROM appointments WHERE date_time LIKE %s AND status = 'confirmed'",
@@ -129,7 +136,7 @@ async def get_booking(booking_id: int) -> dict | None:
     if is_postgres():
         import psycopg
         from psycopg.rows import dict_row
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
+        conn = await psycopg.AsyncConnection.connect(get_db_url(), row_factory=dict_row)
         async with conn:
             cur = await conn.execute(
                 "SELECT * FROM appointments WHERE id = %s", (booking_id,)
@@ -149,7 +156,7 @@ async def get_booking(booking_id: int) -> dict | None:
 async def cancel_booking(booking_id: int) -> bool:
     if is_postgres():
         import psycopg
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+        conn = await psycopg.AsyncConnection.connect(get_db_url())
         async with conn:
             cur = await conn.execute(
                 "UPDATE appointments SET status = 'cancelled' WHERE id = %s AND status = 'confirmed'",
@@ -172,7 +179,7 @@ async def reschedule_booking(booking_id: int, new_date_time: str) -> bool:
 
     if is_postgres():
         import psycopg
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL)
+        conn = await psycopg.AsyncConnection.connect(get_db_url())
         async with conn:
             cur = await conn.execute(
                 "UPDATE appointments SET date_time = %s WHERE id = %s AND status = 'confirmed'",
@@ -193,7 +200,7 @@ async def get_all_bookings() -> list[dict]:
     if is_postgres():
         import psycopg
         from psycopg.rows import dict_row
-        conn = await psycopg.AsyncConnection.connect(DATABASE_URL, row_factory=dict_row)
+        conn = await psycopg.AsyncConnection.connect(get_db_url(), row_factory=dict_row)
         async with conn:
             cur = await conn.execute(
                 "SELECT * FROM appointments ORDER BY created_at DESC"
