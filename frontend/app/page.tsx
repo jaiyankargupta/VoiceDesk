@@ -34,6 +34,9 @@ export default function CallPage() {
   useEffect(scrollToBottom, [transcript, scrollToBottom]);
 
   const connectMonitor = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
     const wsUrl = API_BASE.replace(/^http/, "ws");
     const ws = new WebSocket(`${wsUrl}/ws/monitor`);
 
@@ -76,7 +79,7 @@ export default function CallPage() {
     setConnectionState("connecting");
 
     try {
-      const res = await fetch(`${API_BASE}/api/token`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/api/token?identity=caller`, { method: "POST" });
       const { token, url } = await res.json();
 
       const room = new Room();
@@ -99,7 +102,6 @@ export default function CallPage() {
       await room.localParticipant.setMicrophoneEnabled(true);
 
       setConnectionState("connected");
-      connectMonitor();
     } catch (err) {
       console.error("Failed to connect:", err);
       setConnectionState("idle");

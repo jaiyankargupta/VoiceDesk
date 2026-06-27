@@ -28,6 +28,9 @@ export default function MonitorPage() {
   const wsRef = useRef<WebSocket | null>(null);
 
   const connectWebSocket = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
     const wsUrl = API_BASE.replace(/^http/, "ws");
     const ws = new WebSocket(`${wsUrl}/ws/monitor`);
 
