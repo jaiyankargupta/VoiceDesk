@@ -4,9 +4,9 @@ import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from livekit.api import LiveKitAPI, AccessToken, VideoGrants
 
 from backend import db
@@ -86,6 +86,17 @@ async def release():
 @app.get("/api/takeover-status")
 async def takeover_status():
     return {"active": takeover_active}
+
+
+@app.post("/api/transfer-response")
+async def transfer_response(request: Request):
+    form = await request.form()
+    digits = form.get("Digits", "")
+    if digits == "1":
+        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">Accepted. Connecting...</Say></Response>'
+    else:
+        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">Declined.</Say><Hangup/></Response>'
+    return Response(content=twiml, media_type="application/xml")
 
 
 @app.websocket("/ws/monitor")
