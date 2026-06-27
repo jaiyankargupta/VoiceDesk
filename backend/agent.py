@@ -126,10 +126,10 @@ async def entrypoint(ctx: JobContext):
         asyncio.create_task(event_bus.emit(EventType.AGENT_STATE, {"state": "thinking"}))
 
     @session.on("function_calls_finished")
-    async def on_tool_done(called_functions):
+    def on_tool_done(called_functions):
         for fn in called_functions:
             if fn.result and "__TRANSFER_REQUESTED__" in str(fn.result):
-                await handle_transfer(session, ctx)
+                asyncio.create_task(handle_transfer(session, ctx))
 
     await session.start(agent=agent, room=ctx.room)
 
