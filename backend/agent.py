@@ -35,6 +35,7 @@ load_dotenv(env_path, override=True)
 if os.getenv("ELEVENLABS_API_KEY") and not os.getenv("ELEVEN_API_KEY"):
     os.environ["ELEVEN_API_KEY"] = os.environ["ELEVENLABS_API_KEY"]
 
+# VoiceDesk AI Agent Worker
 logger = logging.getLogger("voicedesk.agent")
 
 async def get_system_prompt() -> str:

@@ -20,28 +20,28 @@ def _to_utc_iso(dt_str: str) -> str:
 
 
 def _resolve_date(raw: str) -> str:
+    import re
     s = raw.strip().lower()
     today = datetime.now()
 
-    if s == "today":
-        return today.strftime("%Y-%m-%d")
-    if s == "tomorrow":
-        return (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    # If it contains YYYY-MM-DD anywhere, extract it
+    match = re.search(r"\d{4}-\d{2}-\d{2}", raw)
+    if match:
+        return match.group(0)
 
-    # Check for day-of-week names (e.g. "thursday", "next monday")
-    s_clean = s.replace("next ", "")
+    if "tomorrow" in s:
+        return (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    if "today" in s:
+        return today.strftime("%Y-%m-%d")
+
     for i, name in enumerate(_DAY_NAMES):
-        if s_clean == name:
+        if name in s:
             days_ahead = i - today.weekday()
             if days_ahead <= 0:
                 days_ahead += 7
             return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
-    # If it already looks like YYYY-MM-DD, return as-is
-    if len(raw) >= 10 and raw[4] == "-":
-        return raw[:10]
-
-    # Fallback: return today
+    
     logger.warning(f"Could not parse date '{raw}', defaulting to today")
     return today.strftime("%Y-%m-%d")
 
@@ -78,9 +78,9 @@ async def check_availability(
             pass
         return f"No available slots on {date}. All appointment times are fully booked for this date. Please ask the caller for another date."
 
-    # Format slots nicely for the AI to read aloud
+    # Format all slots dynamically without hardcoded limits
     formatted_slots = []
-    for slot in slots[:8]:  # Limit to 8 slots to avoid overwhelming the caller
+    for slot in slots:
         try:
             t = datetime.fromisoformat(slot.replace("Z", "+00:00")).astimezone(ZoneInfo("Asia/Kolkata"))
             formatted_slots.append(t.strftime("%-I:%M %p"))
@@ -242,32 +242,46 @@ async def reschedule_appointment(
     new_date_time: str,
 ):
     
+    import re
     booking_id = int(booking_id)
-    
-    # Resolve date portion from natural language
-    parts = new_date_time.strip().split(" ", 1)
-    date_part = _resolve_date(parts[0])
-    time_part = parts[1] if len(parts) > 1 else "09:00"
-    time_part = time_part.strip().upper().replace(".", "")
-    time_part = time_part.replace("AT ", "").strip()
-    parsed_time = "09:00"  # fallback
-    try:
-        for fmt in ("%I:%M %p", "%I:%M%p", "%I %p", "%I%p", "%H:%M"):
-            try:
-                t = datetime.strptime(time_part, fmt)
-                parsed_time = t.strftime("%H:%M")
-                break
-            except ValueError:
-                continue
-    except Exception:
-        pass
-    new_date_time = f"{date_part} {parsed_time}"
-
     await event_bus.emit(EventType.ACTION, {"action": "rescheduling", "booking_id": booking_id})
 
     booking = await db.get_booking(booking_id)
     if not booking:
         return f"No appointment found with ID {booking_id}."
+
+    # 1. Clean number words if STT/LLM spelled them out
+    s_clean = new_date_time.lower()
+    for w, num in [('forty five', ':45'), ('thirty', ':30'), ('fifteen', ':15'),
+                   ('twelve', '12'), ('eleven', '11'), ('ten', '10'), ('nine', '9'),
+                   ('eight', '8'), ('seven', '7'), ('six', '6'), ('five', '5'),
+                   ('four', '4'), ('three', '3'), ('two', '2'), ('one', '1')]:
+        s_clean = re.sub(r'\b' + w + r'\b', num, s_clean)
+    s_clean = s_clean.replace(' :', ':').upper()
+
+    # 2. Determine date (if no date mentioned, preserve existing appointment date)
+    has_date = 'TODAY' in s_clean or 'TOMORROW' in s_clean or any(d in s_clean for d in ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']) or re.search(r'\d{4}-\d{2}-\d{2}', s_clean)
+    if has_date:
+        date_part = _resolve_date(new_date_time)
+    else:
+        date_part = str(booking.get("date_time", ""))[:10]
+
+    # 3. Extract time
+    parsed_time = "09:00"
+    match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?', s_clean)
+    if match:
+        hr = int(match.group(1))
+        mn = int(match.group(2) or 0)
+        ampm = match.group(3)
+        if ampm == 'PM' and hr < 12:
+            hr += 12
+        elif ampm == 'AM' and hr == 12:
+            hr = 0
+        elif not ampm and hr < 8:
+            hr += 12
+        parsed_time = f"{hr:02d}:{mn:02d}"
+
+    new_date_time = f"{date_part} {parsed_time}"
 
     if cal.is_configured() and booking.get("cal_booking_uid"):
         cal_start = _to_utc_iso(new_date_time)

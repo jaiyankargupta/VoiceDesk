@@ -105,7 +105,7 @@ async def get_available_slots(date: str, duration: str = "") -> list[str]:
             if isinstance(s, dict) and s.get("time"):
                 available.append(s["time"])
 
-    return available[:10]
+    return available
 
 
 async def create_booking(
