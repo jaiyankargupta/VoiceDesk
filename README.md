@@ -7,7 +7,7 @@
 
 A production-ready voice agent application built with LiveKit, OpenAI, and Twilio. Features real-time appointment booking, live monitoring with take-over capability, and warm transfer to human agents.
 
-## 📹 Demo Video
+## Demo Video
 
 Watch the full demonstration of VoiceDesk in action, including booking, monitoring, and live takeover:
 
@@ -17,7 +17,7 @@ Watch the full demonstration of VoiceDesk in action, including booking, monitori
 
 ---
 
-## ⚙️ System Architecture
+## System Architecture
 
 VoiceDesk uses a decoupled architecture with WebRTC for ultra-low latency voice and WebSockets for real-time monitoring and control.
 
@@ -34,8 +34,8 @@ VoiceDesk uses a decoupled architecture with WebRTC for ultra-low latency voice 
                                ┌────────────┴───────────┐
                                │                        │
                           ┌────▼────┐              ┌────▼──────┐
-                          │ SQLite  │              │  Cal.com  │
-                          │ (local) │              │(Scheduling│
+                          │ Neon DB │              │  Cal.com  │
+                          │(Postgres│              │(Scheduling│
                           └─────────┘              └───────────┘
                                │
                           ┌────▼────┐
@@ -47,28 +47,28 @@ VoiceDesk uses a decoupled architecture with WebRTC for ultra-low latency voice 
 
 ### Core Components
 1. **LiveKit Agent (Python)**: Handles speech-to-text (Deepgram), reasoning (OpenAI GPT-4o), and text-to-speech (ElevenLabs), alongside executing tools.
-2. **FastAPI Backend**: Provides REST API, WebSocket event streaming for the monitor UI, and SQLite database connections.
+2. **FastAPI Backend**: Provides REST API, WebSocket event streaming for the monitor UI, and Neon (PostgreSQL) database connections.
 3. **Next.js Frontend**: Contains the caller interface (WebRTC) and the watcher/monitor dashboard (WebSockets + REST).
 4. **Cal.com**: External scheduling integration for real-time calendar syncing.
 5. **Twilio**: Executes SIP/PSTN warm transfers to human agents.
 
 ---
 
-## ✨ Features
+## Features
 
-- **🗣️ Voice Conversation** — Natural speech via Deepgram STT, GPT-4o reasoning, ElevenLabs TTS
-- **📅 Appointment Booking** — Check availability, book, reschedule, or cancel via voice
-- **🧠 Intent Detection** — Automatically detects booking, complaint, billing, and transfer intents
-- **📞 Warm Transfer** — Dials a human agent via Twilio, speaks a summary, handles accept/decline
-- **📡 Live Monitoring** — Real-time transcript, agent state, intent, and action tracking
-- **⏸️ Take-Over** — Watcher can pause the AI and speak directly to the caller
-- **⚡ Barge-in Support** — Caller can interrupt the agent mid-sentence
-- **📝 Post-Call Summary** — GPT-4o generates a summary when the call ends
-- **🔗 Cal.com Integration** — Optional real calendar scheduling (falls back to local DB)
+- **Voice Conversation** — Natural speech via Deepgram STT, GPT-4o reasoning, ElevenLabs TTS
+- **Appointment Booking** — Check availability, book, reschedule, or cancel via voice
+- **Intent Detection** — Automatically detects booking, complaint, billing, and transfer intents
+- **Warm Transfer** — Dials a human agent via Twilio, speaks a summary, handles accept/decline
+- **Live Monitoring** — Real-time transcript, agent state, intent, and action tracking
+- **Take-Over** — Watcher can pause the AI and speak directly to the caller
+- **Barge-in Support** — Caller can interrupt the agent mid-sentence
+- **Post-Call Summary** — GPT-4o generates a summary when the call ends
+- **Cal.com Integration** — Optional real calendar scheduling (falls back to Neon PostgreSQL)
 
 ---
 
-## 🔑 Getting API Keys
+## Getting API Keys
 
 ### LiveKit
 1. Sign up at [livekit.io](https://livekit.io)
@@ -104,7 +104,7 @@ VoiceDesk uses a decoupled architecture with WebRTC for ultra-low latency voice 
 
 ---
 
-## 🛠️ Setup
+## Setup
 
 ### Prerequisites
 - Python 3.10+
@@ -152,11 +152,12 @@ TWILIO_ACCOUNT_SID=AC...
 TWILIO_AUTH_TOKEN=...
 TWILIO_FROM_NUMBER=+1...
 HUMAN_AGENT_PHONE=+1...
+DATABASE_URL=postgresql://...
 ```
 
 ---
 
-## 🚀 Running Locally
+## Running Locally
 
 ### Start the backend (two processes)
 
@@ -188,7 +189,7 @@ npm run dev
 
 ---
 
-## 📖 Workflows
+## Workflows
 
 ### Appointment Booking
 1. Caller connects and is greeted by Alex (AI receptionist)
@@ -197,7 +198,7 @@ npm run dev
 4. Agent calls `check_availability` to verify the slot
 5. Agent calls `book_appointment` to confirm and save
 6. Agent reads back the full booking confirmation
-7. Booking is stored in SQLite (and Cal.com if configured)
+7. Booking is stored in Neon Database (and Cal.com if configured)
 
 ### Live Monitoring
 1. Open `/monitor` in a separate browser tab
@@ -224,7 +225,7 @@ npm run dev
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 VoiceDesk/
@@ -232,7 +233,7 @@ VoiceDesk/
 │   ├── agent.py            # LiveKit voice agent with VoicePipelineAgent
 │   ├── main.py             # FastAPI server (token, appointments, WebSocket)
 │   ├── tools.py            # Function tools for the LLM
-│   ├── db.py               # SQLite appointment storage
+│   ├── db.py               # Neon Postgres appointment storage
 │   ├── cal_service.py      # Cal.com API wrapper (optional)
 │   ├── twilio_transfer.py  # Warm transfer via Twilio
 │   ├── monitoring.py       # Real-time event bus
@@ -256,7 +257,7 @@ VoiceDesk/
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
@@ -265,7 +266,7 @@ VoiceDesk/
 | **Speech-to-Text** | Deepgram Nova-3 |
 | **Text-to-Speech** | ElevenLabs |
 | **Telephony** | Twilio |
-| **Calendar** | Cal.com (optional) & SQLite |
+| **Calendar** | Cal.com (optional) & Neon PostgreSQL |
 | **Backend API** | FastAPI + Uvicorn |
 | **Frontend** | Next.js 14 (App Router) |
 | **Real-time** | WebSocket + LiveKit WebRTC |
