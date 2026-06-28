@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from livekit.agents import function_tool, RunContext
 from backend import db, cal_service as cal
 from backend.monitoring import event_bus, EventType
@@ -7,6 +8,15 @@ from backend.monitoring import event_bus, EventType
 logger = logging.getLogger("voicedesk.tools")
 
 _DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def _to_utc_iso(dt_str: str) -> str:
+    try:
+        clean = dt_str.replace("T", " ")[:16]
+        local_dt = datetime.strptime(clean, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+        return local_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return dt_str.replace(" ", "T") + ":00Z" if "T" not in dt_str else dt_str
 
 
 def _resolve_date(raw: str) -> str:
@@ -38,17 +48,14 @@ def _resolve_date(raw: str) -> str:
 
 @function_tool(
     name="check_availability",
-    description="Check available appointment slots for a given date. The date can be natural language like 'today', 'tomorrow', 'Thursday', or a specific date in YYYY-MM-DD format. Specify duration like '15m', '30m', '45m', or '60m'.",
+    description="Check available appointment slots for a given date. The date can be natural language like 'today', 'tomorrow', 'Thursday', or a specific date in YYYY-MM-DD format. Specify duration like '30m' or '60m'.",
 )
 async def check_availability(
     context: RunContext,
     date: str,
     duration: str = "30m",
 ):
-    """
-    date: The date to check, e.g. 'today', 'tomorrow', 'Thursday', or 'YYYY-MM-DD'.
-    duration: Preferred meeting length, e.g. '15m', '30m', '45m', or '60m'.
-    """
+   
     date = _resolve_date(date)
     await event_bus.emit(EventType.ACTION, {"action": f"checking availability ({duration})", "date": date})
 
@@ -62,13 +69,20 @@ async def check_availability(
         slots = await db.get_available_slots(date)
 
     if not slots:
-        return f"No available slots on {date}. Please try another date."
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d")
+            day_name = dt.strftime("%A")
+            if day_name in ["Saturday", "Sunday"]:
+                return f"No available slots on {date} because our calendar is closed on {day_name}s. Inform the caller that we are closed on weekends and suggest a weekday (Monday-Friday)."
+        except Exception:
+            pass
+        return f"No available slots on {date}. All appointment times are fully booked for this date. Please ask the caller for another date."
 
     # Format slots nicely for the AI to read aloud
     formatted_slots = []
     for slot in slots[:8]:  # Limit to 8 slots to avoid overwhelming the caller
         try:
-            t = datetime.fromisoformat(slot.replace("Z", "+00:00"))
+            t = datetime.fromisoformat(slot.replace("Z", "+00:00")).astimezone(ZoneInfo("Asia/Kolkata"))
             formatted_slots.append(t.strftime("%-I:%M %p"))
         except Exception:
             formatted_slots.append(slot)
@@ -78,7 +92,7 @@ async def check_availability(
 
 @function_tool(
     name="book_appointment",
-    description="Book an appointment after confirming details with the caller. All fields are required. Specify the exact duration (e.g. '15m', '30m', '45m', '60m') and the specific topic/reason so the system dynamically generates their custom meeting.",
+    description="Book an appointment after confirming details with the caller. All fields are required. Specify the exact duration (e.g. '30m' or '60m') and the specific topic/reason so the system dynamically generates their custom meeting.",
 )
 async def book_appointment(
     context: RunContext,
@@ -137,7 +151,7 @@ async def book_appointment(
     cal_uid = None
     if cal.is_configured():
         try:
-            cal_start = date_time.replace(" ", "T") + ":00Z" if "T" not in date_time else date_time
+            cal_start = _to_utc_iso(date_time)
             result = await cal.create_booking(
                 name=caller_name,
                 email=email,
@@ -256,7 +270,7 @@ async def reschedule_appointment(
         return f"No appointment found with ID {booking_id}."
 
     if cal.is_configured() and booking.get("cal_booking_uid"):
-        cal_start = new_date_time.replace(" ", "T") + ":00Z" if "T" not in new_date_time else new_date_time
+        cal_start = _to_utc_iso(new_date_time)
         try:
             result = await cal.reschedule_booking(booking["cal_booking_uid"], cal_start)
             if not result:

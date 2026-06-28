@@ -11,7 +11,7 @@ CAL_BASE_URL = "https://api.cal.com/v2"
 def _get_headers() -> dict:
     return {
         "Authorization": f"Bearer {os.getenv('CAL_API_KEY', '')}",
-        "cal-api-version": "2024-08-13",
+        "cal-api-version": "2024-06-14",
         "Content-Type": "application/json",
     }
 
@@ -37,53 +37,46 @@ def _parse_duration(duration: str | int) -> int:
 
 async def _get_or_create_event_type(title: str = "", duration: str | int = 30) -> int:
     dur_mins = _parse_duration(duration)
-    clean_title = title.strip() or f"VoiceDesk Consultation ({dur_mins}m)"
-    cache_key = (clean_title.lower(), dur_mins)
-
-    if cache_key in _DYNAMIC_EVENTS_CACHE:
-        return _DYNAMIC_EVENTS_CACHE[cache_key]
-
-    slug_base = re.sub(r"[^a-z0-9]+", "-", clean_title.lower()).strip("-") or "meeting"
-    slug = f"{slug_base}-{dur_mins}m"
-
-    headers = {
-        "Authorization": f"Bearer {os.getenv('CAL_API_KEY', '')}",
-        "cal-api-version": "2024-06-14",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "title": clean_title,
-        "slug": slug,
-        "lengthInMinutes": dur_mins,
-        "description": f"On-demand scheduled event for {clean_title}",
-    }
-
-    fallback_id = os.getenv("CAL_EVENT_TYPE_ID") or "6140294"
-
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(f"{CAL_BASE_URL}/event-types", headers=headers, json=payload, timeout=10)
-            if resp.status_code == 400 and "slug" in resp.text.lower():
-                payload["slug"] = f"{slug}-{int(time.time())}"
-                resp = await client.post(f"{CAL_BASE_URL}/event-types", headers=headers, json=payload, timeout=10)
-
-            if resp.status_code == 201:
-                event_id = int(resp.json().get("data", {}).get("id"))
-                _DYNAMIC_EVENTS_CACHE[cache_key] = event_id
-                os.environ["CAL_EVENT_TYPE_ID"] = str(event_id)
-                return event_id
-    except Exception as e:
-        print(f"Dynamic event creation error: {e}")
-
-    return int(fallback_id) if str(fallback_id).isdigit() else 6140294
+    if dur_mins <= 15 and os.getenv("CAL_EVENT_ID_15M"):
+        return int(os.getenv("CAL_EVENT_ID_15M"))
+    elif dur_mins == 45 and os.getenv("CAL_EVENT_ID_60M"): # use 60m slot or main ID
+        return int(os.getenv("CAL_EVENT_TYPE_ID", "6143627"))
+    elif dur_mins >= 60 and os.getenv("CAL_EVENT_ID_60M"):
+        return int(os.getenv("CAL_EVENT_ID_60M"))
+    elif os.getenv("CAL_EVENT_ID_30M"):
+        return int(os.getenv("CAL_EVENT_ID_30M"))
+    
+    fallback_id = os.getenv("CAL_EVENT_TYPE_ID") or "6143627"
+    return int(fallback_id) if str(fallback_id).isdigit() else 6143627
 
 
 def is_configured() -> bool:
     return bool(os.getenv("CAL_API_KEY"))
 
 
+async def get_event_type_details() -> dict:
+    """Fetch live event type configuration (title and allowed duration options) from Cal.com."""
+    event_id = os.getenv("CAL_EVENT_TYPE_ID", "6143627")
+    if not is_configured():
+        return {"title": "Doctor Consultation", "durations": [30, 60]}
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{CAL_BASE_URL}/event-types/{event_id}",
+                headers=_get_headers(),
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                data = resp.json().get("data", {})
+                title = data.get("title", "Doctor Consultation")
+                options = data.get("lengthInMinutesOptions") or [data.get("lengthInMinutes", 30)]
+                return {"title": title, "durations": sorted(list(set(options)))}
+    except Exception as e:
+        logger.warning(f"Failed to fetch event type details: {e}")
+    return {"title": "Doctor Consultation", "durations": [30, 60]}
+
+
 async def get_available_slots(date: str, duration: str = "") -> list[str]:
-    """Fetch open slots from Cal.com for a given date (YYYY-MM-DD)."""
     event_type_id = await _get_or_create_event_type("VoiceDesk Meeting", duration or 30)
     params = {
         "startTime": f"{date}T00:00:00Z",
@@ -123,18 +116,25 @@ async def create_booking(
     phone: str = "",
     duration: str = "",
 ) -> dict:
-    """Create a booking on Cal.com and return the booking details."""
     event_type_id = await _get_or_create_event_type(reason or f"Meeting with {name}", duration or 30)
+    user_email = email or f"{name.lower().replace(' ', '.')}@placeholder.com"
     payload = {
         "eventTypeId": event_type_id,
         "start": start_time,
         "attendee": {
             "name": name,
-            "email": email or f"{name.lower().replace(' ', '.')}@placeholder.com",
+            "email": user_email,
             "timeZone": "Asia/Kolkata",
             "language": "en",
         },
-        "metadata": {"reason": reason, "phone": phone},
+        "responses": {
+            "name": name,
+            "email": user_email,
+            "reason": reason or "Consultation",
+        },
+        "metadata": {},
+        "timeZone": "Asia/Kolkata",
+        "language": "en",
     }
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -156,12 +156,13 @@ async def create_booking(
 
 async def cancel_booking(booking_uid: str) -> bool:
     async with httpx.AsyncClient() as client:
-        resp = await client.delete(
+        resp = await client.post(
             f"{CAL_BASE_URL}/bookings/{booking_uid}/cancel",
             headers=_get_headers(),
+            json={"cancellationReason": "Cancelled by user via VoiceDesk"},
             timeout=10,
         )
-        return resp.status_code in (200, 204)
+        return resp.status_code in (200, 201, 204)
 
 
 async def reschedule_booking(booking_uid: str, new_start_time: str) -> dict | None:

@@ -37,12 +37,16 @@ if os.getenv("ELEVENLABS_API_KEY") and not os.getenv("ELEVEN_API_KEY"):
 
 logger = logging.getLogger("voicedesk.agent")
 
-def get_system_prompt() -> str:
-    return """You are Alex, VoiceDesk's AI receptionist. Match caller's language (multilingual). Keep voice replies natural & short (max 2 sentences).
+async def get_system_prompt() -> str:
+    from backend import cal_service as cal
+    details = await cal.get_event_type_details()
+    durations_str = ", ".join(f"{d}m" for d in details.get("durations", [30, 60]))
+    title = details.get("title", "Consultation")
+    return f"""You are Alex, VoiceDesk's AI receptionist for {title}. Match caller's language (multilingual). Keep voice replies natural & short (max 2 sentences).
 
 ## FLOW (Ask ONE detail at a time)
 1. Greet & get appointment reason.
-2. Duration (15m, 30m, 45m, or 60m).
+2. Duration -> Inform caller available durations for {title} are: {durations_str}. Ask which length they prefer.
 3. Date/Time -> Verify via check_availability. Offer open alternatives if taken.
 4. Full Name.
 5. Phone -> Read back digit-by-digit to confirm.
@@ -81,7 +85,7 @@ async def entrypoint(ctx: JobContext):
     session = AgentSession(
         stt=deepgram.STT(model="nova-3"),
         llm=_get_llm(),
-        tts=elevenlabs.TTS(),
+        tts=deepgram.TTS(model="aura-asteria-en"),
     )
 
     tools = [
@@ -94,8 +98,9 @@ async def entrypoint(ctx: JobContext):
         end_call,
     ]
 
+    instructions = await get_system_prompt()
     agent = Agent(
-        instructions=get_system_prompt(),
+        instructions=instructions,
         tools=tools,
     )
 
