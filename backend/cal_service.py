@@ -116,11 +116,13 @@ async def create_booking(
     phone: str = "",
     duration: str = "",
 ) -> dict:
-    event_type_id = await _get_or_create_event_type(reason or f"Meeting with {name}", duration or 30)
+    dur_mins = _parse_duration(duration)
+    event_type_id = await _get_or_create_event_type(reason or f"Meeting with {name}", dur_mins)
     user_email = email or f"{name.lower().replace(' ', '.')}@placeholder.com"
     payload = {
         "eventTypeId": event_type_id,
         "start": start_time,
+        "lengthInMinutes": dur_mins,
         "attendee": {
             "name": name,
             "email": user_email,

@@ -14,6 +14,19 @@ def get_db_url() -> str:
     return url
 
 
+import re
+from datetime import timedelta
+
+def _parse_dur_mins(duration: int | str) -> int:
+    if isinstance(duration, int):
+        return duration
+    match = re.search(r"(\d+)", str(duration))
+    if match:
+        val = int(match.group(1))
+        return val * 60 if "h" in str(duration).lower() else val
+    return 30
+
+
 async def init_db():
     conn = await psycopg.AsyncConnection.connect(get_db_url())
     async with conn:
@@ -31,6 +44,7 @@ async def init_db():
             )
         """)
         await conn.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS email TEXT;")
+        await conn.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS duration INT DEFAULT 30;")
 
 
 async def save_booking(
@@ -40,43 +54,70 @@ async def save_booking(
     contact_number: str,
     cal_booking_uid: str | None = None,
     email: str = "",
+    duration: int | str = 30,
 ) -> int:
+    dur_mins = _parse_dur_mins(duration)
     conn = await psycopg.AsyncConnection.connect(get_db_url(), row_factory=dict_row)
     async with conn:
         cur = await conn.execute(
             """INSERT INTO appointments
-               (cal_booking_uid, caller_name, reason, date_time, contact_number, email)
-               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-            (cal_booking_uid, caller_name, reason, date_time, contact_number, email),
+               (cal_booking_uid, caller_name, reason, date_time, contact_number, email, duration)
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (cal_booking_uid, caller_name, reason, date_time, contact_number, email, dur_mins),
         )
         row = await cur.fetchone()
         return row["id"]
 
 
-async def check_slot_available(date_time: str) -> bool:
-    conn = await psycopg.AsyncConnection.connect(get_db_url())
-    async with conn:
-        cur = await conn.execute(
-            "SELECT COUNT(*) FROM appointments WHERE date_time = %s AND status = 'confirmed'",
-            (date_time,),
-        )
-        row = await cur.fetchone()
-        return row[0] == 0
-
-
-async def get_available_slots(date: str) -> list[str]:
-    """Return available hourly slots for a given date (YYYY-MM-DD)."""
-    all_slots = [f"{date} {h:02d}:00" for h in range(9, 18)]
+async def check_slot_available(date_time: str, exclude_booking_id: int | None = None, duration: int | str = 30) -> bool:
+    new_dur = _parse_dur_mins(duration)
+    try:
+        new_start = datetime.strptime(date_time, "%Y-%m-%d %H:%M")
+    except Exception:
+        return False
+    new_end = new_start + timedelta(minutes=new_dur)
+    date_prefix = date_time[:10]
 
     conn = await psycopg.AsyncConnection.connect(get_db_url())
     async with conn:
-        cur = await conn.execute(
-            "SELECT date_time FROM appointments WHERE date_time LIKE %s AND status = 'confirmed'",
-            (f"{date}%",),
-        )
-        booked = {row[0] for row in await cur.fetchall()}
+        if exclude_booking_id is not None:
+            cur = await conn.execute(
+                "SELECT date_time, COALESCE(duration, 30) FROM appointments WHERE date_time LIKE %s AND status = 'confirmed' AND id != %s",
+                (f"{date_prefix}%", exclude_booking_id),
+            )
+        else:
+            cur = await conn.execute(
+                "SELECT date_time, COALESCE(duration, 30) FROM appointments WHERE date_time LIKE %s AND status = 'confirmed'",
+                (f"{date_prefix}%",),
+            )
+        rows = await cur.fetchall()
 
-    return [s for s in all_slots if s not in booked]
+    for dt_str, ex_dur in rows:
+        try:
+            ex_start = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            ex_end = ex_start + timedelta(minutes=int(ex_dur))
+            # Check overlap
+            if new_start < ex_end and ex_start < new_end:
+                return False
+        except Exception:
+            continue
+    return True
+
+
+async def get_available_slots(date: str, duration: int | str = 30) -> list[str]:
+    """Return available 30-minute intervals that have enough free room for the requested duration."""
+    dur_mins = _parse_dur_mins(duration)
+    all_slots = []
+    # Generate slots every 30 mins from 9:00 to 17:00
+    for h in range(9, 17):
+        all_slots.append(f"{date} {h:02d}:00")
+        all_slots.append(f"{date} {h:02d}:30")
+
+    available = []
+    for s in all_slots:
+        if await check_slot_available(s, duration=dur_mins):
+            available.append(s)
+    return available
 
 
 async def get_booking(booking_id: int) -> dict | None:
@@ -100,7 +141,7 @@ async def cancel_booking(booking_id: int) -> bool:
 
 
 async def reschedule_booking(booking_id: int, new_date_time: str) -> bool:
-    if not await check_slot_available(new_date_time):
+    if not await check_slot_available(new_date_time, exclude_booking_id=booking_id):
         return False
 
     conn = await psycopg.AsyncConnection.connect(get_db_url())

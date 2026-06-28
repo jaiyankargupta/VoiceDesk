@@ -64,19 +64,47 @@ async def check_availability(
             slots = await cal.get_available_slots(date, duration)
         except Exception as e:
             logger.warning(f"Cal.com slot check failed: {e}")
-            slots = await db.get_available_slots(date)
+            slots = await db.get_available_slots(date, duration)
     else:
-        slots = await db.get_available_slots(date)
+        slots = await db.get_available_slots(date, duration)
 
     if not slots:
         try:
             dt = datetime.strptime(date, "%Y-%m-%d")
             day_name = dt.strftime("%A")
+            
+            # Find next business day
+            days_ahead = 1
+            while (dt + timedelta(days=days_ahead)).weekday() in [5, 6]:
+                days_ahead += 1
+            next_dt = dt + timedelta(days=days_ahead)
+            next_date = next_dt.strftime("%Y-%m-%d")
+            next_day_name = next_dt.strftime("%A")
+            
+            if cal.is_configured():
+                try:
+                    next_slots = await cal.get_available_slots(next_date, duration)
+                except Exception:
+                    next_slots = await db.get_available_slots(next_date, duration)
+            else:
+                next_slots = await db.get_available_slots(next_date, duration)
+                
+            formatted_next = []
+            for slot in next_slots:
+                try:
+                    t = datetime.fromisoformat(slot.replace("Z", "+00:00")).astimezone(ZoneInfo("Asia/Kolkata"))
+                    formatted_next.append(t.strftime("%-I:%M %p"))
+                except Exception:
+                    formatted_next.append(slot)
+            
+            slots_str = ", ".join(formatted_next) if formatted_next else "No slots available"
             if day_name in ["Saturday", "Sunday"]:
-                return f"No available slots on {date} because our calendar is closed on {day_name}s. Inform the caller that we are closed on weekends and suggest a weekday (Monday-Friday)."
-        except Exception:
-            pass
-        return f"No available slots on {date}. All appointment times are fully booked for this date. Please ask the caller for another date."
+                return f"No available slots on {date} because our office is closed on {day_name}s. However, we checked the calendar for Monday ({next_date}) and these times are open for a {duration} appointment: {slots_str}. Please suggest these exact available times to the caller."
+            else:
+                return f"No available slots on {date} as it is fully booked. However, on {next_day_name} ({next_date}), these times are open for a {duration} appointment: {slots_str}. Please suggest these exact available times to the caller."
+        except Exception as e:
+            logger.warning(f"Next day check failed: {e}")
+        return f"No available slots on {date}. All appointment times are fully booked."
 
     # Format all slots dynamically without hardcoded limits
     formatted_slots = []
@@ -143,7 +171,7 @@ async def book_appointment(
         "status": "booking...",
     })
 
-    available = await db.check_slot_available(date_time)
+    available = await db.check_slot_available(date_time, duration=duration)
     if not available:
         await event_bus.emit(EventType.APPOINTMENT_DATA, {"status": "slot taken"})
         return f"Sorry, the slot at {date_time} is no longer available. Please choose a different time."
@@ -173,6 +201,7 @@ async def book_appointment(
         contact_number=contact_number,
         cal_booking_uid=cal_uid,
         email=email,
+        duration=duration,
     )
 
     await event_bus.emit(EventType.APPOINTMENT_DATA, {
