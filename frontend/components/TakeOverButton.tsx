@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import styles from "./TakeOverButton.module.css";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface TakeOverButtonProps {
   roomName: string;

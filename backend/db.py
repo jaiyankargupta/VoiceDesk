@@ -25,10 +25,12 @@ async def init_db():
                 reason TEXT,
                 date_time TEXT NOT NULL,
                 contact_number TEXT,
+                email TEXT,
                 status TEXT DEFAULT 'confirmed',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await conn.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS email TEXT;")
 
 
 async def save_booking(
@@ -37,14 +39,15 @@ async def save_booking(
     date_time: str,
     contact_number: str,
     cal_booking_uid: str | None = None,
+    email: str = "",
 ) -> int:
     conn = await psycopg.AsyncConnection.connect(get_db_url(), row_factory=dict_row)
     async with conn:
         cur = await conn.execute(
             """INSERT INTO appointments
-               (cal_booking_uid, caller_name, reason, date_time, contact_number)
-               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-            (cal_booking_uid, caller_name, reason, date_time, contact_number),
+               (cal_booking_uid, caller_name, reason, date_time, contact_number, email)
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+            (cal_booking_uid, caller_name, reason, date_time, contact_number, email),
         )
         row = await cur.fetchone()
         return row["id"]
@@ -115,5 +118,24 @@ async def get_all_bookings() -> list[dict]:
         cur = await conn.execute(
             "SELECT * FROM appointments ORDER BY created_at DESC"
         )
+        rows = await cur.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def lookup_booking(query: str) -> list[dict]:
+    clean_q = query.strip()
+    q_like = f"%{clean_q.lower()}%"
+    conn = await psycopg.AsyncConnection.connect(get_db_url(), row_factory=dict_row)
+    async with conn:
+        if clean_q.isdigit():
+            cur = await conn.execute(
+                "SELECT * FROM appointments WHERE id = %s OR contact_number LIKE %s ORDER BY id DESC LIMIT 5",
+                (int(clean_q), q_like),
+            )
+        else:
+            cur = await conn.execute(
+                "SELECT * FROM appointments WHERE LOWER(caller_name) LIKE %s OR contact_number LIKE %s OR LOWER(email) LIKE %s ORDER BY id DESC LIMIT 5",
+                (q_like, q_like, q_like),
+            )
         rows = await cur.fetchall()
         return [dict(row) for row in rows]

@@ -62,15 +62,16 @@ class EventBus:
     async def emit(self, event_type: EventType, data: dict | None = None):
         await self.publish(MonitorEvent(type=event_type, data=data or {}))
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as s:
-                await s.post(
-                    "http://127.0.0.1:8080/api/events",
+            import httpx
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    "http://127.0.0.1:8000/api/events",
                     json={"type": event_type.value, "data": data or {}},
-                    timeout=aiohttp.ClientTimeout(total=0.5),
+                    timeout=1.0,
                 )
         except Exception:
             pass
 
 
 event_bus = EventBus()
+

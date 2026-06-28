@@ -14,52 +14,48 @@ from livekit.agents import (
     WorkerOptions,
     cli,
 )
-from livekit.plugins import openai, deepgram, elevenlabs, silero
+from livekit.plugins import openai, deepgram, elevenlabs
+from livekit.api import LiveKitAPI
 
 from backend.monitoring import event_bus, EventType
 from backend.tools import (
     check_availability,
     book_appointment,
+    lookup_appointment,
     cancel_appointment,
     reschedule_appointment,
     transfer_to_human,
+    end_call,
 )
 from backend.twilio_transfer import initiate_warm_transfer
 from backend import db
 
 env_path = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(env_path)
+load_dotenv(env_path, override=True)
 if os.getenv("ELEVENLABS_API_KEY") and not os.getenv("ELEVEN_API_KEY"):
     os.environ["ELEVEN_API_KEY"] = os.environ["ELEVENLABS_API_KEY"]
 
 logger = logging.getLogger("voicedesk.agent")
 
-SYSTEM_PROMPT = """You are a friendly, professional receptionist named Alex at a medical clinic called VoiceDesk Health.
+def get_system_prompt() -> str:
+    return """You are Alex, VoiceDesk's AI receptionist. Match caller's language (multilingual). Keep voice replies natural & short (max 2 sentences).
 
-Your responsibilities:
-- Greet callers warmly and ask how you can help
-- Book, reschedule, or cancel appointments using the available tools
-- When booking, you must collect: full name, reason for visit, preferred date and time, and contact phone number.
-- CRITICAL: Ask for these details ONE AT A TIME naturally (e.g. ask for the date/time first to check availability, then ask for their name, then their phone number). Do NOT ask for all details in a single sentence.
-- Always check availability before confirming a booking
-- Read back the full booking confirmation to the caller
+## FLOW (Ask ONE detail at a time)
+1. Greet & get appointment reason.
+2. Duration (15m, 30m, 45m, or 60m).
+3. Date/Time -> Verify via check_availability. Offer open alternatives if taken.
+4. Full Name.
+5. Phone -> Read back digit-by-digit to confirm.
+6. Email -> Spell back letter-by-letter to confirm. Repeat until confirmed.
+7. Confirm -> Read back full summary (reason, duration, date/time, name, phone, email). Ask "Shall I book this?"
+8. Book -> Call book_appointment ONLY after explicit confirmation. Share ID & ask if anything else is needed.
+9. End -> When caller is done, ask "Would you like me to end the call?" ONLY after "yes", say goodbye & call end_call.
 
-Intent detection:
-- If the caller mentions billing, payments, or account charges → use transfer_to_human with reason "billing inquiry"
-- If the caller wants to file a complaint → use transfer_to_human with reason "complaint"
-- If the caller says anything like "talk to a person", "speak to someone", "real agent", "human" → use transfer_to_human with the appropriate reason
-- For general questions about clinic hours or services, answer directly
-
-Style:
-- Keep responses concise and conversational — this is a phone call, not a chat
-- Use natural spoken language, avoid bullet points or markdown
-- Confirm details by repeating them back before booking
-- Be patient if the caller is unclear; ask clarifying questions
-"""
-
-
-def prewarm(proc: JobProcess):
-    proc.userdata["vad"] = silero.VAD.load()
+## CRITICAL RULES
+- NEVER call book_appointment without confirmed phone, email, and explicit user consent on the summary.
+- Rescheduling/Changing time? ALWAYS use reschedule_appointment(booking_id). NEVER use book_appointment for changes.
+- Existing appointments? Use lookup_appointment or cancel_appointment.
+- Billing inquiries or complaints? Use transfer_to_human."""
 
 
 def _get_llm(model: str = "gpt-4o"):
@@ -67,7 +63,7 @@ def _get_llm(model: str = "gpt-4o"):
     if not groq_key and os.getenv("OPENAI_API_KEY", "").startswith("gsk_"):
         groq_key = os.getenv("OPENAI_API_KEY")
     if groq_key:
-        groq_model = "llama-3.3-70b-versatile" if "gpt" in model else model
+        groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         return openai.LLM(
             model=groq_model,
             base_url="https://api.groq.com/openai/v1",
@@ -83,7 +79,6 @@ async def entrypoint(ctx: JobContext):
     await event_bus.emit(EventType.CALL_STATUS, {"status": "connected"})
 
     session = AgentSession(
-        vad=ctx.proc.userdata["vad"],
         stt=deepgram.STT(model="nova-3"),
         llm=_get_llm(),
         tts=elevenlabs.TTS(),
@@ -92,13 +87,15 @@ async def entrypoint(ctx: JobContext):
     tools = [
         check_availability,
         book_appointment,
+        lookup_appointment,
         cancel_appointment,
         reschedule_appointment,
         transfer_to_human,
+        end_call,
     ]
 
     agent = Agent(
-        instructions=SYSTEM_PROMPT,
+        instructions=get_system_prompt(),
         tools=tools,
     )
 
@@ -130,9 +127,14 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("function_tools_executed")
     def on_tools_executed(ev):
-        for out in ev.function_call_outputs:
-            if out and out.output and "__TRANSFER_REQUESTED__" in str(out.output):
+        outputs = getattr(ev, "function_call_outputs", []) or []
+        for out in outputs:
+            output_str = str(getattr(out, "output", "") or getattr(out, "result", "") or "")
+            logger.info(f"Tool output: {output_str}")
+            if "__TRANSFER_REQUESTED__" in output_str:
                 asyncio.create_task(handle_transfer(session, ctx))
+            if "__END_CALL__" in output_str:
+                asyncio.create_task(handle_end_call(session, ctx))
 
     @ctx.room.on("participant_connected")
     def on_participant_connected(participant):
@@ -163,8 +165,54 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent=agent, room=ctx.room)
 
     await session.generate_reply(
-        instructions="Greet the caller warmly. Ask how you can help them today."
+        instructions="Greet the caller warmly by saying: 'Hello, thank you for calling VoiceDesk. My name is Alex, how can I assist you today?'"
     )
+
+
+async def handle_end_call(session: AgentSession, ctx: JobContext):
+    """Gracefully end the call: generate summary, then disconnect all participants."""
+    logger.info("End call requested by agent")
+
+    # Generate call summary before disconnecting
+    try:
+        summary = await generate_call_summary(session)
+        await event_bus.emit(EventType.CALL_SUMMARY, {"summary": summary})
+    except Exception as e:
+        logger.warning(f"Failed to generate call summary: {e}")
+
+    # Wait for TTS to finish the goodbye message
+    await asyncio.sleep(4)
+
+    # Remove all remote participants (callers) from the room via LiveKit server API
+    try:
+        from livekit.protocol.room import RoomParticipantIdentity, DeleteRoomRequest
+
+        lk_api = LiveKitAPI(
+            url=os.getenv("LIVEKIT_URL", ""),
+            api_key=os.getenv("LIVEKIT_API_KEY", ""),
+            api_secret=os.getenv("LIVEKIT_API_SECRET", ""),
+        )
+
+        for participant in list(ctx.room.remote_participants.values()):
+            logger.info(f"Removing participant: {participant.identity}")
+            try:
+                await lk_api.room.remove_participant(
+                    RoomParticipantIdentity(
+                        room=ctx.room.name,
+                        identity=participant.identity,
+                    )
+                )
+            except Exception as ex:
+                logger.warning(f"Could not remove {participant.identity}: {ex}")
+
+        # Delete the room entirely
+        await lk_api.room.delete_room(
+            DeleteRoomRequest(room=ctx.room.name)
+        )
+        await lk_api.aclose()
+        logger.info("Room deleted, call ended")
+    except Exception as e:
+        logger.error(f"Failed to end call via API: {e}", exc_info=True)
 
 
 async def handle_transfer(session: AgentSession, ctx: JobContext):
@@ -225,6 +273,5 @@ if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
-            prewarm_fnc=prewarm,
         )
     )

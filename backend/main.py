@@ -15,7 +15,7 @@ from backend import db
 from backend.monitoring import event_bus, EventType, MonitorEvent
 
 env_path = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(env_path)
+load_dotenv(env_path, override=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voicedesk.server")
 
@@ -45,7 +45,7 @@ app.add_middleware(
 
 
 @app.post("/api/token")
-async def create_token(room: str = "voicedesk-room", identity: str = "caller"):
+async def create_token(room: str = "voicedesk-call", identity: str = "caller"):
     if not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         raise HTTPException(status_code=500, detail="LiveKit credentials not configured")
 
@@ -132,4 +132,4 @@ async def monitor_websocket(ws: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

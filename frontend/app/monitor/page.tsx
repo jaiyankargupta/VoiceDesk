@@ -7,7 +7,7 @@ import TakeOverButton from "@/components/TakeOverButton";
 import CallSummary from "@/components/CallSummary";
 import styles from "./monitor.module.css";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface TranscriptEntry {
   role: "user" | "agent";
@@ -138,7 +138,7 @@ export default function MonitorPage() {
             </div>
             <div className={styles.controlBody}>
               <TakeOverButton
-                roomName="voicedesk-room"
+                roomName="voicedesk-call"
                 onStateChange={setTakeoverActive}
               />
               {takeoverActive && (

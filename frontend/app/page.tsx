@@ -11,7 +11,7 @@ import {
 } from "livekit-client";
 import styles from "./page.module.css";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface TranscriptEntry {
   role: "user" | "agent";
