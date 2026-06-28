@@ -19,6 +19,23 @@ def _to_utc_iso(dt_str: str) -> str:
         return dt_str.replace(" ", "T") + ":00Z" if "T" not in dt_str else dt_str
 
 
+def _sanitize_email(email: str) -> str:
+    import re
+    e = email.strip()
+    # If already looks like a valid email, just lowercase and return
+    if re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', e):
+        return e.lower()
+    # Normalise spoken email: replace 'dot' → '.', 'at' → '@', 'underscore' → '_', 'dash'/'hyphen' → '-'
+    e = e.lower()
+    e = re.sub(r'\s+dot\s+', '.', e)
+    e = re.sub(r'\s+at\s+', '@', e)
+    e = re.sub(r'\s+(underscore|under score|under_score)\s+', '_', e)
+    e = re.sub(r'\s+(dash|hyphen|minus)\s+', '-', e)
+    # Remove any remaining spaces
+    e = e.replace(' ', '')
+    return e
+
+
 def _resolve_date(raw: str) -> str:
     import re
     s = raw.strip().lower()
@@ -131,6 +148,10 @@ async def book_appointment(
     email: str = "",
     duration: str = "30m",
 ):
+    # Sanitize email — convert verbally-spelled format to proper email
+    if email:
+        email = _sanitize_email(email)
+
     if not caller_name.strip() or not contact_number.strip() or not email.strip():
         return "Error: Cannot book appointment. Missing required details (name, contact number, or email). Please collect all details from the caller or use reschedule_appointment if modifying an existing booking."
 
